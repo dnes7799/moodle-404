@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="local/riskdetector/db" VERSION="20250315">
+  <TABLES>
+
+    <TABLE NAME="local_riskdetector_config" COMMENT="Risk threshold config per course">
+      <FIELDS>
+        <FIELD NAME="id"                   TYPE="int"    LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid"             TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="createdby"            TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="attendance_enabled"   TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="attendance_threshold" TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="50"/>
+        <FIELD NAME="attendance_weight"    TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="25"/>
+        <FIELD NAME="login_enabled"        TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
+        <FIELD NAME="login_days"           TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="14"/>
+        <FIELD NAME="login_weight"         TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="20"/>
+        <FIELD NAME="quiz_enabled"         TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
+        <FIELD NAME="quiz_threshold"       TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="50"/>
+        <FIELD NAME="quiz_weight"          TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="20"/>
+        <FIELD NAME="assign_enabled"       TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
+        <FIELD NAME="assign_threshold"     TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="50"/>
+        <FIELD NAME="assign_weight"        TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="25"/>
+        <FIELD NAME="missing_enabled"      TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
+        <FIELD NAME="missing_threshold"    TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="2"/>
+        <FIELD NAME="missing_weight"       TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="10"/>
+        <FIELD NAME="email_subject"        TYPE="char"   LENGTH="255" NOTNULL="false"/>
+        <FIELD NAME="email_template"       TYPE="text"   NOTNULL="false"/>
+        <FIELD NAME="timecreated"          TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timemodified"         TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="idx_courseid" UNIQUE="false" FIELDS="courseid"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="local_riskdetector_results" COMMENT="Computed risk results per student per course">
+      <FIELDS>
+        <FIELD NAME="id"             TYPE="int"    LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid"       TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="userid"         TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="risk_score"     TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="risk_band"      TYPE="char"   LENGTH="20" NOTNULL="true" DEFAULT="low"/>
+        <FIELD NAME="is_atrisk"      TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="reasons"        TYPE="text"   NOTNULL="false"/>
+        <FIELD NAME="last_login"     TYPE="int"    LENGTH="10" NOTNULL="false" DEFAULT="0"/>
+        <FIELD NAME="attendance_pct" TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="false" DEFAULT="0"/>
+        <FIELD NAME="quiz_avg"       TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="false" DEFAULT="0"/>
+        <FIELD NAME="assign_avg"     TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="false" DEFAULT="0"/>
+        <FIELD NAME="missing_count"  TYPE="int"    LENGTH="5"  NOTNULL="false" DEFAULT="0"/>
+        <FIELD NAME="timecalculated" TYPE="int"    LENGTH="10" NOTNULL="true"  DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="idx_course_user" UNIQUE="true"  FIELDS="courseid, userid"/>
+        <INDEX NAME="idx_atrisk"      UNIQUE="false" FIELDS="is_atrisk"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="local_riskdetector_notif" COMMENT="Notification log">
+      <FIELDS>
+        <FIELD NAME="id"          TYPE="int"  LENGTH="10"  NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid"    TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="studentid"   TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="sentby"      TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="subject"     TYPE="char" LENGTH="255" NOTNULL="true" DEFAULT=""/>
+        <FIELD NAME="messagehtml" TYPE="text" NOTNULL="false"/>
+        <FIELD NAME="timesent"    TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="idx_course_student" UNIQUE="false" FIELDS="courseid, studentid"/>
+      </INDEXES>
+    </TABLE>
+
+  </TABLES>
+</XMLDB>
