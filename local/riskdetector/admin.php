@@ -4,11 +4,12 @@
  * ============================================================================
  *
  * Saves to mdl_local_riskdetector_defaults (separate from course configs).
- * No weight fields anywhere — only enabled/threshold + email template.
+ * No weight fields anywhere — only enabled/threshold + email template + SMTP.
  *
  * Features:
  *   - Set default thresholds for all 4 signals
  *   - Set default email template with plain text / HTML / Preview tabs
+ *   - Configure SMTP (sender name, host, port, username, app password)
  *   - Apply defaults to unconfigured courses only (safe)
  *   - Overwrite ALL course configs with defaults (with confirmation)
  *
@@ -31,6 +32,7 @@ global $USER, $DB, $OUTPUT;
 
 $saved        = false;
 $bulk_applied = 0;
+$bulk_action  = '';
 
 // ── Handle POST ────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
@@ -48,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
         $smtp_password_final = $submitted_password;
     }
 
-    // ── Build data object (5 email fields + thresholds) ────────────────────
+    // ── Build data object (thresholds + email template + SMTP) ─────────────
     $data = (object)[
         // Thresholds
         'attendance_enabled'   => optional_param('attendance_enabled',   0,   PARAM_INT),
@@ -62,47 +64,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
         // Email template
         'email_subject'        => optional_param('email_subject',         '',  PARAM_TEXT),
         'email_template'       => optional_param('email_template',        '',  PARAM_RAW),
-        // Email config — 5 fields only, all go to defaults table
+        // SMTP — all saved into defaults table
         'sender_name'          => optional_param('sender_name',           '',  PARAM_TEXT),
         'smtp_host'            => optional_param('smtp_host',             '',  PARAM_TEXT),
         'smtp_port'            => optional_param('smtp_port',             587, PARAM_INT),
         'smtp_username'        => optional_param('smtp_username',         '',  PARAM_TEXT),
         'smtp_password'        => $smtp_password_final,
     ];
-error_log(json_encode(['host'=>$data->smtp_host,'user'=>$data->smtp_username,'pass'=>$data->smtp_password!==''?'HAS':'EMPTY']));
-local_riskdetector_save_defaults($data);
-    // ── Save ALL fields to mdl_local_riskdetector_defaults ────────────────
+
+    // ── Save ONCE to mdl_local_riskdetector_defaults ───────────────────────
     local_riskdetector_save_defaults($data);
     $saved = true;
 
-    // Bulk apply
+    // ── Bulk apply (optional) ─────────────────────────────────────────────
     if ($post_action === 'apply_all') {
         $bulk_applied = local_riskdetector_apply_defaults_to_all();
+        $bulk_action  = 'all';
     } elseif ($post_action === 'apply_new') {
         $bulk_applied = local_riskdetector_apply_defaults_to_new();
+        $bulk_action  = 'new';
     }
 }
 
 // ── Load ALL defaults from mdl_local_riskdetector_defaults ────────────────
-// Single source of truth for thresholds AND email config.
+// Single source of truth for thresholds AND email AND SMTP config.
 $d = local_riskdetector_get_defaults() ?: (object)[
     'attendance_enabled'   => 0,   'attendance_threshold' => 50,
     'login_enabled'        => 1,   'login_days'           => 14,
     'quiz_enabled'         => 1,   'quiz_threshold'       => 50,
     'assign_enabled'       => 1,   'assign_threshold'     => 50,
     'email_subject'   => 'Academic support notice — {course_name}',
-    'email_template'  => "Dear {student_name},
-
-You have been identified as needing "
-                       . "additional support in {course_name}.
-
-Concerns: {risk_reasons}
-
-"
-                       . "Please log in and review your course.
-
-Regards,
-{teacher_name}",
+    'email_template'  => "Dear {student_name},\n\n"
+                       . "You have been identified as needing additional support in {course_name}.\n\n"
+                       . "Concerns: {risk_reasons}\n\n"
+                       . "Please log in and review your course.\n\n"
+                       . "Regards,\n{teacher_name}",
     'sender_name'   => '',
     'smtp_host'     => '',
     'smtp_port'     => 587,
@@ -110,7 +106,7 @@ Regards,
     'smtp_password' => '',
 ];
 
-// ── Email config variables (all from defaults table, NOT get_config) ───────
+// ── Email / SMTP config variables (all from defaults table) ───────────────
 $sender_name       = $d->sender_name   ?? '';
 $smtp_host         = $d->smtp_host     ?? '';
 $smtp_port         = (int)($d->smtp_port ?? 587);
@@ -252,8 +248,12 @@ textarea.adm-input-full{resize:vertical;line-height:1.5}
 <?php if ($saved): ?>
 <div class="adm-alert adm-alert-success">
     &#10003;
-    <?php if ($bulk_applied > 0): ?>
-        Defaults saved and applied to <strong><?php echo $bulk_applied; ?> course(s)</strong> successfully.
+    <?php if ($bulk_action === 'all' && $bulk_applied > 0): ?>
+        Defaults saved. <strong><?php echo $bulk_applied; ?> course(s)</strong> have been overwritten with these defaults.
+    <?php elseif ($bulk_action === 'new' && $bulk_applied > 0): ?>
+        Defaults saved. Applied to <strong><?php echo $bulk_applied; ?> unconfigured course(s)</strong>.
+    <?php elseif ($bulk_action === 'all' || $bulk_action === 'new'): ?>
+        Defaults saved. No courses matched the bulk criteria.
     <?php else: ?>
         Default settings saved to <strong>mdl_local_riskdetector_defaults</strong>.
     <?php endif; ?>
