@@ -2,6 +2,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $capabilities = [
+    
     'local/riskdetector:viewdashboard' => [
         'captype'      => 'read',
         'contextlevel' => CONTEXT_COURSE,
@@ -32,6 +33,22 @@ $capabilities = [
         'contextlevel' => CONTEXT_SYSTEM,
         'archetypes'   => [
             'manager' => CAP_ALLOW,
+        ],
+    ],
+    'local/riskdetector:receivealert' => [
+        'captype'       => 'read',
+        'contextlevel'  => CONTEXT_COURSE,
+        'archetypes'    => [
+            'student' => CAP_ALLOW,
+        ],
+    ],
+
+    'local/riskdetector:managenotifications' => [
+        'captype'       => 'write',
+        'contextlevel'  => CONTEXT_SYSTEM,
+        'archetypes'    => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
         ],
     ],
 ];

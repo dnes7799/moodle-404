@@ -9,19 +9,14 @@
         <FIELD NAME="createdby"            TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
         <FIELD NAME="attendance_enabled"   TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="0"/>
         <FIELD NAME="attendance_threshold" TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="50"/>
-        <FIELD NAME="attendance_weight"    TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="25"/>
         <FIELD NAME="login_enabled"        TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
         <FIELD NAME="login_days"           TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="14"/>
-        <FIELD NAME="login_weight"         TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="20"/>
         <FIELD NAME="quiz_enabled"         TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
         <FIELD NAME="quiz_threshold"       TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="50"/>
-        <FIELD NAME="quiz_weight"          TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="20"/>
         <FIELD NAME="assign_enabled"       TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
         <FIELD NAME="assign_threshold"     TYPE="number" LENGTH="5"  DECIMALS="2"   NOTNULL="true" DEFAULT="50"/>
-        <FIELD NAME="assign_weight"        TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="25"/>
         <FIELD NAME="missing_enabled"      TYPE="int"    LENGTH="1"  NOTNULL="true" DEFAULT="1"/>
         <FIELD NAME="missing_threshold"    TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="2"/>
-        <FIELD NAME="missing_weight"       TYPE="int"    LENGTH="3"  NOTNULL="true" DEFAULT="10"/>
         <FIELD NAME="email_subject"        TYPE="char"   LENGTH="255" NOTNULL="false"/>
         <FIELD NAME="email_template"       TYPE="text"   NOTNULL="false"/>
         <FIELD NAME="timecreated"          TYPE="int"    LENGTH="10" NOTNULL="true" DEFAULT="0"/>
@@ -69,6 +64,7 @@
         <FIELD NAME="subject"     TYPE="char" LENGTH="255" NOTNULL="true" DEFAULT=""/>
         <FIELD NAME="messagehtml" TYPE="text" NOTNULL="false"/>
         <FIELD NAME="timesent"    TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="messageid" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

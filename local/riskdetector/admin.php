@@ -1,7 +1,6 @@
 <?php
 /**
  * Student Risk Detector — Admin Default Settings
- * ============================================================================
  *
  * Saves to mdl_local_riskdetector_defaults (separate from course configs).
  * No weight fields anywhere — only enabled/threshold + email template.
@@ -37,18 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
 
     $post_action = optional_param('post_action', 'save', PARAM_ALPHA);
 
-    // ── Keep existing password if field left blank ─────────────────────────
-    $existing_defaults   = local_riskdetector_get_defaults();
-    $submitted_password  = optional_param('smtp_password', '', PARAM_RAW);
-
-    if ($submitted_password === '' && $existing_defaults && !empty($existing_defaults->smtp_password)) {
-        // Admin left password blank — keep the stored one (decoded so save_defaults re-encodes it)
-        $smtp_password_final = base64_decode($existing_defaults->smtp_password);
-    } else {
-        $smtp_password_final = $submitted_password;
-    }
-
-    // ── Build data object (5 email fields + thresholds) ────────────────────
+    // ── Build data object (thresholds + email template only) ───────────────
     $data = (object)[
         // Thresholds
         'attendance_enabled'   => optional_param('attendance_enabled',   0,   PARAM_INT),
@@ -62,16 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
         // Email template
         'email_subject'        => optional_param('email_subject',         '',  PARAM_TEXT),
         'email_template'       => optional_param('email_template',        '',  PARAM_RAW),
-        // Email config — 5 fields only, all go to defaults table
-        'sender_name'          => optional_param('sender_name',           '',  PARAM_TEXT),
-        'smtp_host'            => optional_param('smtp_host',             '',  PARAM_TEXT),
-        'smtp_port'            => optional_param('smtp_port',             587, PARAM_INT),
-        'smtp_username'        => optional_param('smtp_username',         '',  PARAM_TEXT),
-        'smtp_password'        => $smtp_password_final,
     ];
-error_log(json_encode(['host'=>$data->smtp_host,'user'=>$data->smtp_username,'pass'=>$data->smtp_password!==''?'HAS':'EMPTY']));
-local_riskdetector_save_defaults($data);
-    // ── Save ALL fields to mdl_local_riskdetector_defaults ────────────────
+
     local_riskdetector_save_defaults($data);
     $saved = true;
 
@@ -83,8 +63,7 @@ local_riskdetector_save_defaults($data);
     }
 }
 
-// ── Load ALL defaults from mdl_local_riskdetector_defaults ────────────────
-// Single source of truth for thresholds AND email config.
+// ── Load ALL defaults ──────────────────────────────────────────────────────
 $d = local_riskdetector_get_defaults() ?: (object)[
     'attendance_enabled'   => 0,   'attendance_threshold' => 50,
     'login_enabled'        => 1,   'login_days'           => 14,
@@ -93,35 +72,49 @@ $d = local_riskdetector_get_defaults() ?: (object)[
     'email_subject'   => 'Academic support notice — {course_name}',
     'email_template'  => "Dear {student_name},
 
-You have been identified as needing "
-                       . "additional support in {course_name}.
+You have been identified as needing additional support in {course_name}.
 
 Concerns: {risk_reasons}
 
-"
-                       . "Please log in and review your course.
+Please log in and review your course.
 
 Regards,
 {teacher_name}",
-    'sender_name'   => '',
-    'smtp_host'     => '',
-    'smtp_port'     => 587,
-    'smtp_username' => '',
-    'smtp_password' => '',
 ];
-
-// ── Email config variables (all from defaults table, NOT get_config) ───────
-$sender_name       = $d->sender_name   ?? '';
-$smtp_host         = $d->smtp_host     ?? '';
-$smtp_port         = (int)($d->smtp_port ?? 587);
-$smtp_username     = $d->smtp_username ?? '';
-$smtp_has_password = !empty($d->smtp_password);
 
 // ── Stats ──────────────────────────────────────────────────────────────────
 $total_courses    = $DB->count_records_select('course', 'id != 1 AND visible = 1');
 $configured_count = $DB->count_records_select('local_riskdetector_config', 'courseid != 0');
 $unconfigured     = max(0, $total_courses - $configured_count);
 $back             = new moodle_url('/local/riskdetector/index.php');
+
+// ── Fetch course name lists for hover tooltips ─────────────────────────────
+// All visible courses
+$all_course_rows = $DB->get_records_select(
+    'course', 'id != 1 AND visible = 1', [], 'fullname ASC', 'id, fullname'
+);
+$all_course_names = array_values(array_map(fn($c) => $c->fullname, $all_course_rows));
+
+// Configured course IDs
+$configured_ids = $DB->get_fieldset_select(
+    'local_riskdetector_config', 'courseid', 'courseid != 0'
+);
+$configured_ids_flip = array_flip($configured_ids);
+
+$configured_names   = [];
+$unconfigured_names = [];
+foreach ($all_course_rows as $c) {
+    if (isset($configured_ids_flip[$c->id])) {
+        $configured_names[] = $c->fullname;
+    } else {
+        $unconfigured_names[] = $c->fullname;
+    }
+}
+
+// JSON-encode for JS (safe output)
+$js_all_courses    = json_encode($all_course_names,    JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
+$js_configured     = json_encode($configured_names,    JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
+$js_unconfigured   = json_encode($unconfigured_names,  JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
 
 echo $OUTPUT->header();
 ?>
@@ -138,19 +131,64 @@ echo $OUTPUT->header();
 
 /* ── Stats ── */
 .adm-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px}
-.adm-stat{background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:16px 20px;text-align:center}
+.adm-stat{background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:16px 20px;text-align:center;position:relative;cursor:default;transition:border-color .2s,box-shadow .2s}
+.adm-stat:hover{border-color:#a78bfa;box-shadow:0 4px 18px rgba(108,92,231,.12)}
 .adm-stat-value{font-size:28px;font-weight:800;color:#1a202c}
 .adm-stat-label{font-size:12px;color:#8a92a6;text-transform:uppercase;font-weight:600;margin-top:4px;letter-spacing:.5px}
 .adm-stat.purple .adm-stat-value{color:#6c5ce7}
 .adm-stat.success .adm-stat-value{color:#276749}
 .adm-stat.warning .adm-stat-value{color:#d69e2e}
 
+/* ── Stat hover badge (tiny "List" hint) ── */
+.adm-stat-hint{display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-size:10px;font-weight:600;color:#a78bfa;opacity:0;transition:opacity .2s;letter-spacing:.4px;text-transform:uppercase}
+.adm-stat:hover .adm-stat-hint{opacity:1}
+
+/* ── Course tooltip ── */
+.adm-stat-tooltip{
+    display:none;
+    position:absolute;
+    top:calc(100% + 8px);
+    left:50%;
+    transform:translateX(-50%);
+    background:#1a1a2e;
+    color:#e2e8f0;
+    border-radius:12px;
+    padding:14px 16px;
+    width:280px;
+    max-height:320px;
+    overflow-y:auto;
+    z-index:9999;
+    box-shadow:0 12px 40px rgba(0,0,0,.28);
+    text-align:left;
+    font-size:12px;
+    line-height:1.5;
+    pointer-events:none;
+}
+.adm-stat-tooltip::-webkit-scrollbar{width:4px}
+.adm-stat-tooltip::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
+.adm-stat-tooltip::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:4px}
+/* Arrow */
+.adm-stat-tooltip::before{
+    content:'';
+    position:absolute;
+    top:-6px;
+    left:50%;
+    transform:translateX(-50%);
+    border-width:0 6px 6px;
+    border-style:solid;
+    border-color:transparent transparent #1a1a2e;
+}
+.adm-stat:hover .adm-stat-tooltip{display:block}
+.adm-tooltip-title{font-size:11px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.1)}
+.adm-tooltip-item{display:flex;align-items:flex-start;gap:7px;padding:4px 0;color:#cbd5e0;border-bottom:1px solid rgba(255,255,255,.05)}
+.adm-tooltip-item:last-child{border-bottom:none}
+.adm-tooltip-item-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.adm-tooltip-more{margin-top:10px;padding:6px 10px;background:rgba(108,92,231,.18);border-radius:7px;font-size:11px;font-weight:600;color:#a78bfa;text-align:center}
+.adm-tooltip-empty{color:#718096;font-style:italic;font-size:12px;padding:4px 0}
+
 /* ── Alerts ── */
 .adm-alert{border-radius:10px;padding:13px 16px;margin-bottom:20px;font-size:14px;font-weight:500;display:flex;align-items:flex-start;gap:10px}
 .adm-alert-success{background:#f0fff4;border:1.5px solid #c6f6d5;color:#276749}
-
-/* ── Info box ── */
-.adm-info-box{background:#f0edff;border:1px solid #c9c2f7;border-radius:10px;padding:12px 16px;font-size:13px;color:#4a5568;line-height:1.6;margin-bottom:20px}
 
 /* ── Two-column rule grid ── */
 .adm-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
@@ -182,7 +220,7 @@ echo $OUTPUT->header();
 .adm-num-input:focus{outline:none;border-color:#6c5ce7}
 .adm-unit{font-size:13px;color:#718096}
 
-/* ── Email card ── */
+/* ── Email template card ── */
 .adm-email-card{background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;padding:22px 24px;margin-bottom:16px}
 .adm-email-card h3{font-size:15px;font-weight:700;color:#1a202c;margin:0 0 6px;display:flex;align-items:center;gap:8px}
 .adm-email-card > p{font-size:13px;color:#8a92a6;margin:0 0 16px}
@@ -246,7 +284,7 @@ textarea.adm-input-full{resize:vertical;line-height:1.5}
         <h1>Default Threshold Settings</h1>
         <p>Set global defaults. Teachers see these pre-filled when they configure a course for the first time.</p>
     </div>
-    <span class="adm-admin-badge">&#9881; Admin only</span>
+    <span class="adm-admin-badge">&#9881; Admin View</span>
 </div>
 
 <?php if ($saved): ?>
@@ -255,34 +293,38 @@ textarea.adm-input-full{resize:vertical;line-height:1.5}
     <?php if ($bulk_applied > 0): ?>
         Defaults saved and applied to <strong><?php echo $bulk_applied; ?> course(s)</strong> successfully.
     <?php else: ?>
-        Default settings saved to <strong>mdl_local_riskdetector_defaults</strong>.
+        Settings saved successfully!
     <?php endif; ?>
 </div>
 <?php endif; ?>
 
-<!-- Stats -->
-<div class="adm-stats">
-    <div class="adm-stat purple">
+<!-- Stats — hover to see course list -->
+<div class="adm-stats" id="admStats">
+
+    <!-- Total courses -->
+    <div class="adm-stat purple" data-tooltip-key="all">
         <div class="adm-stat-value"><?php echo $total_courses; ?></div>
         <div class="adm-stat-label">Total courses</div>
+        <div class="adm-stat-hint">&#9776; View list</div>
+        <div class="adm-stat-tooltip" id="tooltip-all"></div>
     </div>
-    <div class="adm-stat success">
+
+    <!-- Configured -->
+    <div class="adm-stat success" data-tooltip-key="configured">
         <div class="adm-stat-value"><?php echo $configured_count; ?></div>
         <div class="adm-stat-label">Configured</div>
+        <div class="adm-stat-hint">&#9776; View list</div>
+        <div class="adm-stat-tooltip" id="tooltip-configured"></div>
     </div>
-    <div class="adm-stat warning">
+
+    <!-- Not configured -->
+    <div class="adm-stat warning" data-tooltip-key="unconfigured">
         <div class="adm-stat-value"><?php echo $unconfigured; ?></div>
         <div class="adm-stat-label">Not configured yet</div>
+        <div class="adm-stat-hint">&#9776; View list</div>
+        <div class="adm-stat-tooltip" id="tooltip-unconfigured"></div>
     </div>
-</div>
 
-<!-- Info box -->
-<div class="adm-info-box">
-    &#128161; <strong>How this works:</strong>
-    These defaults are saved in a separate <code>mdl_local_riskdetector_defaults</code> table.
-    When a teacher opens the configure page for the first time, these values are pre-filled automatically.
-    If a teacher saves their own settings, those go into <code>mdl_local_riskdetector_config</code> and override your defaults for that course only.
-    Using <strong>Overwrite all courses</strong> pushes these defaults directly into every course config.
 </div>
 
 <form method="post" action="" id="adminForm">
@@ -401,98 +443,6 @@ textarea.adm-input-full{resize:vertical;line-height:1.5}
 
 </div><!-- end grid -->
 
-<!-- Email / SMTP configuration card -->
-<div class="adm-email-card" style="margin-bottom:16px;">
-    <h3>
-        <span style="background:#e8fdf0;width:32px;height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;font-size:16px;">&#128231;</span>
-        Email sending configuration
-    </h3>
-    <p>Configure SMTP so the plugin can send emails directly to students independent of Moodle's mail settings.</p>
-
-    <!-- Status banner -->
-    <?php if (!empty($smtp_host) && !empty($smtp_username) && $smtp_has_password): ?>
-    <div style="background:#f0fff4;border:1.5px solid #c6f6d5;border-radius:8px;padding:10px 16px;font-size:13px;color:#276749;display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-        &#10003; SMTP ready &mdash;
-        <strong><?php echo s($smtp_username); ?></strong> via <strong><?php echo s($smtp_host . ':' . $smtp_port); ?></strong>
-    </div>
-    <?php else: ?>
-    <div style="background:#fffbeb;border:1.5px solid #fef3c7;border-radius:8px;padding:10px 16px;font-size:13px;color:#92400e;display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-        &#9888; SMTP not fully configured &mdash; fill in all fields below to enable email notifications.
-    </div>
-    <?php endif; ?>
-
-    <!-- Field explanations box -->
-    <div style="background:#f0edff;border:1px solid #c9c2f7;border-radius:8px;padding:12px 16px;font-size:13px;color:#4a5568;line-height:1.7;margin-bottom:16px;">
-        <strong style="color:#6c5ce7;">&#128161; Field guide</strong><br>
-        <strong>Sender display name</strong> — The name students see in their inbox as "From" e.g. <em>Student Support Team</em><br>
-        <strong>Email / SMTP username</strong> — Your full email address. Used to log into the mail server AND as the From email address e.g. <em>support@koi.edu.au</em><br>
-        <strong>SMTP host</strong> — Your mail server. Gmail = <code>smtp.gmail.com</code>, Outlook = <code>smtp.office365.com</code><br>
-        <strong>Port</strong> — Use <strong>587</strong> for TLS (recommended) or <strong>465</strong> for SSL<br>
-        <strong>Password</strong> — For Gmail use an App Password, not your regular password
-    </div>
-
-    <!-- 5 fields -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-
-        <div>
-            <label class="adm-label">Sender display name</label>
-            <input type="text" name="sender_name" class="adm-input-full"
-                value="<?php echo s($sender_name); ?>"
-                placeholder="e.g. Student Support Team">
-            <p class="adm-hint">Shown as the "From" name in the student's inbox.</p>
-        </div>
-
-        <div>
-            <label class="adm-label">Email address &amp; SMTP username</label>
-            <input type="text" name="smtp_username" class="adm-input-full"
-                value="<?php echo s($smtp_username); ?>"
-                placeholder="e.g. support@koi.edu.au"
-                autocomplete="off">
-            <p class="adm-hint">Your full email address — used as login AND as the From address.</p>
-        </div>
-
-        <div>
-            <label class="adm-label">SMTP host</label>
-            <input type="text" name="smtp_host" class="adm-input-full"
-                value="<?php echo s($smtp_host); ?>"
-                placeholder="e.g. smtp.gmail.com"
-                autocomplete="off">
-            <p class="adm-hint">Your outgoing mail server hostname.</p>
-        </div>
-
-        <div>
-            <label class="adm-label">SMTP port</label>
-            <input type="number" name="smtp_port" class="adm-input-full"
-                value="<?php echo (int)$smtp_port; ?>"
-                placeholder="587" min="1" max="65535">
-            <p class="adm-hint">587 = TLS &nbsp;|&nbsp; 465 = SSL &nbsp;(auto-detected from port)</p>
-        </div>
-
-        <div style="grid-column: 1 / -1;">
-            <label class="adm-label">
-                SMTP password
-                <?php if ($smtp_has_password): ?>
-                <span style="font-size:11px;color:#00b894;font-weight:500;margin-left:8px;">&#10003; Password is saved</span>
-                <?php endif; ?>
-            </label>
-            <input type="password" name="smtp_password"
-                class="adm-input-full"
-                value=""
-                placeholder="<?php echo $smtp_has_password ? 'Leave blank to keep existing password' : 'Enter SMTP password or app password'; ?>"
-                autocomplete="new-password">
-            <p class="adm-hint">
-                <?php if ($smtp_has_password): ?>
-                    A password is already saved. Leave blank to keep it. Type a new one to replace it.
-                <?php else: ?>
-                    For <strong>Gmail</strong>: go to Google Account &rarr; Security &rarr; 2-Step Verification &rarr; App passwords &rarr; generate one for "Mail".
-                    Do <strong>not</strong> use your regular Gmail password.
-                <?php endif; ?>
-            </p>
-        </div>
-
-    </div>
-</div>
-
 <!-- Email template card -->
 <div class="adm-email-card">
     <h3>
@@ -556,11 +506,6 @@ textarea.adm-input-full{resize:vertical;line-height:1.5}
 
 <!-- Bulk apply -->
 <div class="adm-bulk-card">
-    <h3>&#128640; Bulk apply to courses</h3>
-    <p>
-        <strong>Apply to unconfigured</strong> — sets defaults only on courses where no thresholds have been saved yet. Safe and non-destructive.<br>
-        <strong>Overwrite ALL courses</strong> — replaces every course config with these defaults. Teachers will lose their custom settings.
-    </p>
     <div class="adm-bulk-actions">
         <button type="submit" name="post_action" value="apply_new"
             class="btn-warning" onclick="showSaveLoader('Applying to unconfigured courses\u2026', 'Setting defaults for <?php echo $unconfigured; ?> courses.')">
@@ -607,14 +552,70 @@ textarea.adm-input-full{resize:vertical;line-height:1.5}
 </div>
 
 <script>
-// ── Toggle rule cards ───────────────────────────────────────────────────────
+// ── Course data from PHP (JSON-encoded) ──────────────────────────────────
+const COURSE_DATA = {
+    all:          <?php echo $js_all_courses; ?>,
+    configured:   <?php echo $js_configured; ?>,
+    unconfigured: <?php echo $js_unconfigured; ?>
+};
+
+const TOOLTIP_META = {
+    all:          { title: 'All Courses',           dot: '#6c5ce7' },
+    configured:   { title: 'Configured Courses',    dot: '#276749' },
+    unconfigured: { title: 'Not Yet Configured',    dot: '#d69e2e' }
+};
+
+const VISIBLE_LIMIT = 5; // how many names to show before "+X more"
+
+/**
+ * Build tooltip HTML from a names array.
+ */
+function buildTooltipHtml(key) {
+    const names = COURSE_DATA[key] || [];
+    const meta  = TOOLTIP_META[key];
+
+    if (names.length === 0) {
+        return `<div class="adm-tooltip-title">${meta.title}</div>
+                <div class="adm-tooltip-empty">No courses found.</div>`;
+    }
+
+    const visible = names.slice(0, VISIBLE_LIMIT);
+    const extra   = names.length - VISIBLE_LIMIT;
+
+    let html = `<div class="adm-tooltip-title">${meta.title} &mdash; ${names.length} total</div>`;
+
+    visible.forEach(name => {
+        const escaped = name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html += `<div class="adm-tooltip-item">
+                    <span class="adm-tooltip-item-dot" style="background:${meta.dot};"></span>
+                    <span>${escaped}</span>
+                 </div>`;
+    });
+
+    if (extra > 0) {
+        html += `<div class="adm-tooltip-more">+${extra} more course${extra > 1 ? 's' : ''}</div>`;
+    }
+
+    return html;
+}
+
+// Populate all tooltips on page load
+document.querySelectorAll('.adm-stat[data-tooltip-key]').forEach(function(stat) {
+    const key     = stat.getAttribute('data-tooltip-key');
+    const tooltip = stat.querySelector('.adm-stat-tooltip');
+    if (tooltip) {
+        tooltip.innerHTML = buildTooltipHtml(key);
+    }
+});
+
+// ── Toggle rule cards ────────────────────────────────────────────────────
 function admToggle(name, enabled) {
     document.getElementById('adm_card_' + name).classList.toggle('enabled', enabled);
     const body = document.getElementById('adm_body_' + name);
     if (body) body.classList.toggle('show', enabled);
 }
 
-// ── Email tab switching ─────────────────────────────────────────────────────
+// ── Email tab switching ──────────────────────────────────────────────────
 function switchEmailTab(tab, btn) {
     document.querySelectorAll('.adm-tab-pane').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.adm-tab-btn').forEach(b => b.classList.remove('active'));
@@ -623,7 +624,7 @@ function switchEmailTab(tab, btn) {
     if (tab === 'preview') updatePreview();
 }
 
-// ── Sync plain ↔ HTML editors ─────────────────────────────────────────────
+// ── Sync plain ↔ HTML editors ────────────────────────────────────────────
 function syncEmailContent() {
     document.getElementById('email_html_editor').value =
         document.getElementById('email_plain').value;
@@ -633,7 +634,7 @@ function syncHtmlToPlain() {
         document.getElementById('email_html_editor').value;
 }
 
-// ── Live preview ────────────────────────────────────────────────────────────
+// ── Live preview ─────────────────────────────────────────────────────────
 function updatePreview() {
     const subject = document.querySelector('[name="email_subject"]').value;
     const body    = document.getElementById('email_plain').value;
@@ -657,7 +658,7 @@ function updatePreview() {
     }, 100);
 }
 
-// ── Quick HTML templates ────────────────────────────────────────────────────
+// ── Quick HTML templates ─────────────────────────────────────────────────
 const htmlTemplates = {
     simple: `<p>Dear {student_name},</p>
 <p>You have been identified as needing additional support in <strong>{course_name}</strong>.</p>
@@ -710,7 +711,7 @@ function insertHtmlTemplate(name) {
     document.getElementById('email_plain').value       = tpl;
 }
 
-// ── Save overlay ────────────────────────────────────────────────────────────
+// ── Save overlay ─────────────────────────────────────────────────────────
 function showSaveLoader(msg, sub) {
     document.getElementById('save-overlay-msg').textContent = msg || 'Saving defaults\u2026';
     document.getElementById('save-overlay-sub').textContent = sub || 'Updating global settings.';

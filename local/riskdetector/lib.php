@@ -131,19 +131,6 @@ function local_riskdetector_save_defaults(stdClass $data): void {
 
     $existing = local_riskdetector_get_defaults();
 
-    // ── Prepare email fields — trim strings, keep null if truly empty ──────
-    $f_sender_name   = trim($data->sender_name   ?? '');
-    $f_smtp_host     = trim($data->smtp_host     ?? '');
-    $f_smtp_username = trim($data->smtp_username ?? '');
-    $f_smtp_port     = (int)($data->smtp_port    ?? 587);
-
-    // Password: only encode if a real value was passed in
-    // (admin.php already decoded the stored one if keeping existing)
-    $raw_password    = $data->smtp_password ?? '';
-    $f_smtp_password = ($raw_password !== '')
-        ? base64_encode($raw_password)
-        : null;
-
     $record = (object)[
         'createdby'            => $USER->id,
         'attendance_enabled'   => (int)   ($data->attendance_enabled   ?? 0),
@@ -156,13 +143,7 @@ function local_riskdetector_save_defaults(stdClass $data): void {
         'assign_threshold'     => (float) ($data->assign_threshold     ?? 50),
         'email_subject'        => $data->email_subject  ?? '',
         'email_template'       => $data->email_template ?? '',
-        // ── 5 email config fields ─────────────────────────────────────────
-        'sender_name'   => $f_sender_name   !== '' ? $f_sender_name   : null,
-        'smtp_host'     => $f_smtp_host     !== '' ? $f_smtp_host     : null,
-        'smtp_port'     => $f_smtp_port     >  0   ? $f_smtp_port     : 587,
-        'smtp_username' => $f_smtp_username !== '' ? $f_smtp_username : null,
-        'smtp_password' => $f_smtp_password,
-        'timemodified'  => time(),
+        'timemodified'         => time(),
     ];
 
     if ($existing) {
@@ -181,28 +162,31 @@ function local_riskdetector_save_defaults(stdClass $data): void {
 function local_riskdetector_apply_defaults_to_course(int $courseid, stdClass $defaults): void {
     global $DB, $USER;
 
+    $existing = $DB->get_record('local_riskdetector_config', ['courseid' => $courseid]);
+
+    $now = time();
+
     $record = (object)[
         'courseid'             => $courseid,
         'createdby'            => $USER->id,
-        'attendance_enabled'   => $defaults->attendance_enabled,
-        'attendance_threshold' => $defaults->attendance_threshold,
-        'login_enabled'        => $defaults->login_enabled,
-        'login_days'           => $defaults->login_days,
-        'quiz_enabled'         => $defaults->quiz_enabled,
-        'quiz_threshold'       => $defaults->quiz_threshold,
-        'assign_enabled'       => $defaults->assign_enabled,
-        'assign_threshold'     => $defaults->assign_threshold,
-        'email_subject'        => $defaults->email_subject,
-        'email_template'       => $defaults->email_template,
-        'timemodified'         => time(),
+        'attendance_enabled'   => (int)   ($defaults->attendance_enabled   ?? 0),
+        'attendance_threshold' => (float) ($defaults->attendance_threshold ?? 50),
+        'login_enabled'        => (int)   ($defaults->login_enabled        ?? 1),
+        'login_days'           => (int)   ($defaults->login_days           ?? 14),
+        'quiz_enabled'         => (int)   ($defaults->quiz_enabled         ?? 1),
+        'quiz_threshold'       => (float) ($defaults->quiz_threshold       ?? 50),
+        'assign_enabled'       => (int)   ($defaults->assign_enabled       ?? 1),
+        'assign_threshold'     => (float) ($defaults->assign_threshold     ?? 50),
+        'email_subject'        => (string)($defaults->email_subject        ?? ''),
+        'email_template'       => (string)($defaults->email_template       ?? ''),
+        'timemodified'         => $now,
     ];
 
-    $existing = $DB->get_record('local_riskdetector_config', ['courseid' => $courseid]);
     if ($existing) {
         $record->id = $existing->id;
-        $DB->update_record('local_riskdetector_config', $record);
+        $DB->update_record('local_riskdetector_config', $record, false);
     } else {
-        $record->timecreated = time();
+        $record->timecreated = $now;
         $DB->insert_record('local_riskdetector_config', $record);
     }
 }
@@ -901,6 +885,7 @@ function local_riskdetector_get_results(int $courseid): array {
 
     return $DB->get_records_sql($sql, ['courseid' => $courseid]);
 }
+
 /**
  * Get notification history for a student in a course.
  */

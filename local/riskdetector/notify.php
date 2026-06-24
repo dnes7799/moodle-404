@@ -1,138 +1,173 @@
 <?php
-/**
- * Student Risk Detector — Moodle Notification (bell icon)
- *
- * Sends an in-platform notification via message_send().
- * Saves to local_riskdetector_notif only on confirmed delivery.
- */
+// local/riskdetector/notify.php
+//
+// Dual-mode endpoint:
+//   AJAX  (POST with ajax=1): single-student send, returns JSON. Used by the dashboard.
+//   PAGE  (GET with courseid only): bulk send for all at-risk students in a course; renders an HTML result page.
 
-define('AJAX_SCRIPT', true);
-
-require_once('../../config.php');
+require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot . '/local/riskdetector/lib.php');
 
-function send_json(bool $sent, string $status, string $notice, string $student = '', $message_id = null): void {
-    header('Content-Type: application/json');
-    echo json_encode([
-        'sent'       => $sent,
-        'status'     => $status,
-        'notice'     => $notice,
-        'student'    => $student,
-        'message_id' => $message_id,
-    ]);
-    exit;
-}
+use local_riskdetector\notification\sender;
 
 require_login();
+require_sesskey();
 
-if (!confirm_sesskey()) {
-    send_json(false, 'failed', 'Session expired. Please refresh and try again.');
+$ajax = optional_param('ajax', 0, PARAM_INT);
+
+// ─── AJAX MODE: single-student send ──────────────────────────────────
+if ($ajax) {
+    header('Content-Type: application/json');
+
+    try {
+        $courseid  = required_param('courseid', PARAM_INT);
+        $studentid = required_param('studentid', PARAM_INT);
+        $subject   = optional_param('subject', '', PARAM_TEXT);
+        $custommsg = optional_param('message', '', PARAM_RAW);
+
+        $context = context_course::instance($courseid);
+        require_capability('local/riskdetector:managenotifications', $context);
+
+        $course  = get_course($courseid);
+        $student = core_user::get_user($studentid);
+
+        if (!$student || $student->deleted || $student->suspended) {
+            echo json_encode([
+                'sent'   => false,
+                'notice' => 'Student not found or unavailable.',
+            ]);
+            exit;
+        }
+
+        // Verify the student is actually enrolled in this course.
+        // Stops a teacher in Course A from notifying a student in Course B.
+        if (!is_enrolled($context, $student->id, '', true)) {
+            echo json_encode([
+                'sent'   => false,
+                'notice' => 'That student is not enrolled in this course.',
+            ]);
+            exit;
+        }
+
+        global $DB;
+        $riskdata = $DB->get_record('local_riskdetector_ml', [
+            'course_id'  => $courseid,
+            'student_id' => $studentid,
+        ]);
+
+        if (!$riskdata) {
+            $riskdata = (object)[
+                'risk_score'        => 0,
+                'risk_band'         => 'Unknown',
+                'avg_grade_pct'     => 0,
+                'attendance_pct'    => 0,
+                'submission_pct'    => 0,
+                'days_since_active' => 0,
+            ];
+        }
+
+        $messageid = sender::send_student_alert(
+            $student,
+            $course,
+            $riskdata,
+            $subject !== '' ? $subject : null,
+            $custommsg !== '' ? $custommsg : null
+        );
+
+        if ($messageid) {
+            echo json_encode([
+                'sent'    => true,
+                'student' => fullname($student),
+                'notice'  => 'Notification sent (ID ' . $messageid . ').',
+            ]);
+        } else {
+            echo json_encode([
+                'sent'   => false,
+                'notice' => 'Send failed. Check the site\'s notification settings.',
+            ]);
+        }
+        exit;
+
+    } catch (\required_capability_exception $e) {
+        echo json_encode([
+            'sent'   => false,
+            'notice' => 'You don\'t have permission to send notifications in this course.',
+        ]);
+        exit;
+    } catch (\moodle_exception $e) {
+        echo json_encode([
+            'sent'   => false,
+            'notice' => 'Error: ' . $e->getMessage(),
+        ]);
+        exit;
+    } catch (\Throwable $e) {
+        echo json_encode([
+            'sent'   => false,
+            'notice' => 'Unexpected error: ' . $e->getMessage(),
+        ]);
+        exit;
+    }
 }
 
-$courseid  = required_param('courseid',  PARAM_INT);
-$studentid = required_param('studentid', PARAM_INT);
-$subject   = required_param('subject',   PARAM_TEXT);
-$message   = required_param('message',   PARAM_RAW);
 
-$course  = get_course($courseid);
-$context = context_course::instance($courseid);
+// ─── PAGE MODE: bulk send for all at-risk students ───────────────────
+$courseid = required_param('courseid', PARAM_INT);
+$course   = get_course($courseid);
+$context  = context_course::instance($courseid);
 
-if (!has_capability('local/riskdetector:notify', $context)) {
-    send_json(false, 'failed', 'You do not have permission to send notifications.');
-}
+require_capability('local/riskdetector:managenotifications', $context);
 
-global $USER, $DB;
+$PAGE->set_url('/local/riskdetector/notify.php', ['courseid' => $courseid]);
+$PAGE->set_context($context);
+$PAGE->set_title(get_string('pluginname', 'local_riskdetector'));
+$PAGE->set_heading($course->fullname);
 
-$student = $DB->get_record('user', ['id' => $studentid], '*', MUST_EXIST);
+global $DB, $OUTPUT;
 
-// ── Resolve template placeholders from ML table ──────────────────────────
-$ml_result = $DB->get_record_sql(
-    "SELECT ml.risk_score,
-            ml.ml_risk_band,
-            ml.avg_grade_pct,
-            ml.days_since_active,
-            ml.attendance_pct,
-            ml.submission_pct
-       FROM {local_riskdetector_ml} ml
-      WHERE ml.course_id = :courseid AND ml.student_id = :studentid",
-    ['courseid' => $courseid, 'studentid' => $studentid]
-);
+$threshold = (int)get_config('local_riskdetector', 'risk_threshold') ?: 40;
 
-$reasons_parts = [];
-if ($ml_result) {
-    if ($ml_result->avg_grade_pct < 50)    $reasons_parts[] = 'Low grades (' . round($ml_result->avg_grade_pct, 1) . '%)';
-    if ($ml_result->attendance_pct < 60)    $reasons_parts[] = 'Low attendance (' . round($ml_result->attendance_pct, 1) . '%)';
-    if ($ml_result->submission_pct < 60)    $reasons_parts[] = 'Missing submissions (' . round($ml_result->submission_pct, 1) . '%)';
-    if ($ml_result->days_since_active > 14) $reasons_parts[] = 'Inactive for ' . (int)$ml_result->days_since_active . ' days';
-}
-$reasons_str    = !empty($reasons_parts) ? implode(', ', $reasons_parts) : 'General academic concern';
-$last_login_str = ($ml_result && $ml_result->days_since_active > 0)
-    ? (int)$ml_result->days_since_active . ' days ago'
-    : 'Unknown';
+$sql = "SELECT ml.*
+          FROM {local_riskdetector_ml} ml
+         WHERE ml.course_id = :courseid
+           AND ml.risk_score >= :threshold";
 
-$plugin_defaults = local_riskdetector_get_defaults();
-$from_name = !empty($plugin_defaults->sender_name) ? $plugin_defaults->sender_name : 'Student Risk Detector';
-
-$placeholders = [
-    '{student_name}' => fullname($student),
-    '{course_name}'  => $course->fullname,
-    '{risk_reasons}' => $reasons_str,
-    '{last_login}'   => $last_login_str,
-    '{teacher_name}' => $from_name,
-];
-
-$subject_final = str_replace(array_keys($placeholders), array_values($placeholders), $subject);
-$message_final = str_replace(array_keys($placeholders), array_values($placeholders), $message);
-
-// ── Ensure messaging is enabled ──────────────────────────────────────────
-set_config('messaging', 1);
-
-// ── Force popup-only delivery so Moodle doesn't attempt SMTP ─────────────
-set_user_preference('message_provider_moodle_instantmessage_enabled', 'popup', $student);
-
-// ── Build and send ───────────────────────────────────────────────────────
-$msg                    = new \core\message\message();
-$msg->component         = 'moodle';
-$msg->name              = 'instantmessage';
-$msg->userfrom          = get_admin();
-$msg->userto            = $student;
-$msg->subject           = $subject_final;
-$msg->fullmessage       = strip_tags(
-    str_replace(['<br>', '<br/>', '<br />', '</p>'], "\n", $message_final)
-);
-$msg->fullmessageformat = FORMAT_HTML;
-$msg->fullmessagehtml   = '<div style="font-family:sans-serif;font-size:14px;'
-                         . 'line-height:1.6;color:#2d3748;">'
-                         . nl2br(htmlspecialchars($message_final)) . '</div>';
-$msg->smallmessage      = $subject_final;
-$msg->notification      = 1;
-$msg->contexturl        = (new moodle_url('/course/view.php', ['id' => $courseid]))->out(false);
-$msg->contexturlname    = $course->fullname;
-
-$result_id = false;
-try {
-    $result_id = message_send($msg);
-} catch (\Exception $e) {
-    send_json(false, 'failed', 'Exception: ' . $e->getMessage(), fullname($student));
-}
-
-if (!$result_id || (int)$result_id <= 0) {
-    send_json(false, 'failed',
-        'Moodle could not deliver the notification. Check that the student account is active.',
-        fullname($student));
-}
-
-// ── Confirmed delivered — save to log ────────────────────────────────────
-$DB->insert_record('local_riskdetector_notif', (object)[
-    'courseid'    => $courseid,
-    'studentid'   => $studentid,
-    'sentby'      => $USER->id,
-    'channel'     => 'moodle',
-    'subject'     => $subject_final,
-    'messagehtml' => $message_final,
-    'timesent'    => time(),
+$atrisk = $DB->get_records_sql($sql, [
+    'courseid'  => $courseid,
+    'threshold' => $threshold,
 ]);
 
-send_json(true, 'delivered',
-    'Notification delivered to ' . fullname($student) . '. They will see it in their bell icon.',
-    fullname($student), $result_id);
+$sent    = 0;
+$failed  = 0;
+$skipped = 0;
+
+foreach ($atrisk as $row) {
+    $student = core_user::get_user($row->student_id);
+
+    if (!$student || $student->deleted || $student->suspended) {
+        $skipped++;
+        continue;
+    }
+
+    $messageid = sender::send_student_alert($student, $course, $row);
+
+    if ($messageid) {
+        $sent++;
+    } else {
+        $failed++;
+    }
+}
+
+echo $OUTPUT->header();
+
+$summary = "Notifications sent: {$sent}. Failed: {$failed}. Skipped (deleted/suspended): {$skipped}.";
+$type = $failed > 0
+    ? \core\output\notification::NOTIFY_WARNING
+    : \core\output\notification::NOTIFY_SUCCESS;
+
+echo $OUTPUT->notification($summary, $type);
+
+echo $OUTPUT->continue_button(
+    new moodle_url('/local/riskdetector/dashboard.php', ['courseid' => $courseid])
+);
+
+echo $OUTPUT->footer();

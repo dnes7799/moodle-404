@@ -101,3 +101,22 @@ $string['hiddengradenotice']   = 'Includes grades not yet released to students.'
 $string['pluginname_nav']      = 'Risk Detector';
 $string['backtocourses']       = 'Back to course list';
 $string['backtodashboard']     = 'Back to dashboard';
+
+
+// Message provider names (shown in user Notification preferences page).
+$string['messageprovider:riskalert_student'] = 'Student at-risk alerts';
+$string['messageprovider:riskalert_staff']   = 'At-risk student summary for teachers';
+
+// Capabilities.
+$string['riskdetector:receivealert']        = 'Receive at-risk notifications';
+$string['riskdetector:managenotifications'] = 'Manage at-risk notifications';
+
+// Alert content.
+$string['alert_subject']     = 'Action needed: your progress in {$a->course}';
+$string['alert_greeting']    = 'Hi {$a->firstname},';
+$string['alert_intro']       = 'Our early-alert system has flagged that you may be falling behind in {$a->course}. We want to help you get back on track.';
+$string['alert_reasons_heading'] = 'What we noticed:';
+$string['alert_nextsteps_heading'] = 'Suggested next steps:';
+$string['alert_nextsteps']   = 'Review missed activities, reach out to your teacher, and consider visiting student support if you\'re struggling.';
+$string['alert_footer']      = 'This is an automated message from the Student Risk Detector. If you believe this is a mistake, please contact your course teacher.';
+$string['alert_smallmessage'] = 'You\'ve been flagged as at-risk in {$a}. Tap to see details.';
